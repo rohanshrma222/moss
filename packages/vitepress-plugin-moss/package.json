@@ -33,9 +33,6 @@
     "documentation:build": "pnpm build && cd demo-site && pnpm install && vitepress build documentation",
     "test": "vitest run"
   },
-  "engines": {
-    "node": ">=20.19.0"
-  },
   "peerDependencies": {
     "vite": ">=5.0.0",
     "vitepress": ">=1.0.0"
