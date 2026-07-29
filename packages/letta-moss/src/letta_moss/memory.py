@@ -159,6 +159,7 @@ class MossLettaMemory:
                 raise
             return
         self._index_loaded = True
+        self._index_created = True
 
     async def insert_memory(
         self,
@@ -194,6 +195,9 @@ class MossLettaMemory:
                 # Index already exists — fall through to add_docs below.
 
         await self._client.add_docs(self._index_name, [doc], options=MutationOptions(upsert=True))
+        # A loaded index is a point-in-time query snapshot; invalidate it so the
+        # next search_memory() reloads and can see this newly added memory.
+        self._index_loaded = False
         return memory_id
 
     async def search_memory(
@@ -237,6 +241,9 @@ class MossLettaMemory:
     async def delete_memory(self, memory_id: str) -> None:
         """Delete an archival memory by id."""
         await self._client.delete_docs(self._index_name, [memory_id])
+        # Invalidate the loaded query snapshot so the next search_memory() reloads
+        # and doesn't return an already-deleted memory.
+        self._index_loaded = False
 
     async def get_memory(self, memory_id: str) -> ArchivalMemoryItem | None:
         """Fetch a single archival memory by id, or ``None`` if it doesn't exist."""

@@ -10,6 +10,9 @@ dependencies = [
     "mcp>=1.2",
 ]
 
+[project.optional-dependencies]
+server = ["uvicorn>=0.30.0"]
+
 [dependency-groups]
 dev = [
     "ruff>=0.1.0",

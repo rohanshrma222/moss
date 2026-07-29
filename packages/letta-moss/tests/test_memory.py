@@ -103,6 +103,17 @@ class TestLoadIndex:
         await m.load_index()
         assert m._index_loaded is True
 
+    async def test_marks_index_created_on_successful_load(self, monkeypatch):
+        import letta_moss.memory as memory_mod
+
+        monkeypatch.setattr(memory_mod, "MossClient", FakeClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
+        assert m._index_created is False
+        await m.load_index()
+        assert m._index_created is True
+
     async def test_is_idempotent(self, monkeypatch):
         import letta_moss.memory as memory_mod
 
@@ -185,6 +196,20 @@ class TestInsertMemory:
         [doc] = docs
         assert doc.id == memory_id
         assert m._index_created is True
+
+    async def test_add_docs_invalidates_loaded_index(self, monkeypatch):
+        import letta_moss.memory as memory_mod
+
+        monkeypatch.setattr(memory_mod, "MossClient", FakeClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
+        await m.load_index()
+        assert m._index_loaded is True
+
+        await m.insert_memory("hello world")
+
+        assert m._index_loaded is False
 
     async def test_second_insert_skips_create_index(self, monkeypatch):
         import letta_moss.memory as memory_mod
@@ -342,6 +367,20 @@ class TestDeleteMemory:
         m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
         await m.delete_memory("mem-1")
         assert m._client.delete_docs_calls == [("idx", ["mem-1"])]
+
+    async def test_invalidates_loaded_index(self, monkeypatch):
+        import letta_moss.memory as memory_mod
+
+        monkeypatch.setattr(memory_mod, "MossClient", FakeClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
+        await m.load_index()
+        assert m._index_loaded is True
+
+        await m.delete_memory("mem-1")
+
+        assert m._index_loaded is False
 
 
 class TestGetMemory:

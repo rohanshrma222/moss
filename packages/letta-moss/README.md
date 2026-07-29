@@ -44,7 +44,11 @@ agent = client.agents.create(
 
 ## Quickstart — Option B: MCP server
 
-Runs Moss as an out-of-process MCP server; Letta connects to it as an MCP host, so no Moss code runs inside Letta's own infrastructure.
+Runs Moss as an out-of-process MCP server; Letta connects to it as an MCP host, so no Moss code runs inside Letta's own infrastructure. This option needs an ASGI server, so install the `server` extra:
+
+```bash
+pip install "letta-moss[server]"
+```
 
 ```python
 import uvicorn
