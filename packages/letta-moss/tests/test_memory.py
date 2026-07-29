@@ -29,6 +29,7 @@ class FakeClient:
         self._query_return = FakeQueryResult(docs=[])
         self._create_index_error = None
         self._load_index_error = None
+        self._add_docs_error = None
         self.load_index_calls = []
 
     async def load_index(self, index_name, auto_refresh=False, polling_interval_in_seconds=600):
@@ -43,6 +44,8 @@ class FakeClient:
 
     async def add_docs(self, name, docs, options=None):
         self.add_docs_calls.append((name, docs, options))
+        if self._add_docs_error is not None:
+            raise self._add_docs_error
 
     async def delete_docs(self, name, doc_ids):
         self.delete_docs_calls.append((name, doc_ids))
@@ -163,6 +166,21 @@ class TestLoadIndex:
         await m.load_index()  # must not raise
         assert m._index_loaded is False
 
+    async def test_clears_stale_index_created_flag_when_index_not_found(self, monkeypatch):
+        import letta_moss.memory as memory_mod
+
+        monkeypatch.setattr(memory_mod, "MossClient", FakeClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
+        # Simulate a previous successful load/create having cached "it exists".
+        m._index_created = True
+        m._client._load_index_error = RuntimeError("index not found")
+
+        await m.load_index()
+
+        assert m._index_created is False
+
     async def test_reraises_other_errors(self, monkeypatch):
         import letta_moss.memory as memory_mod
 
@@ -246,6 +264,32 @@ class TestInsertMemory:
         [(name, docs, options)] = m._client.add_docs_calls
         assert name == "idx"
         assert options.upsert is True
+        [doc] = docs
+        assert doc.id == memory_id
+        assert m._index_created is True
+
+    async def test_recreates_index_if_deleted_externally_before_add_docs(self, monkeypatch):
+        """A stale ``_index_created`` should trigger a create_index() retry, not an error.
+
+        Simulates the index having been deleted by another process/user after
+        this instance last confirmed it existed: add_docs() fails with "not
+        found", which should trigger a one-shot create_index() retry rather
+        than propagating the error.
+        """
+        import letta_moss.memory as memory_mod
+
+        monkeypatch.setattr(memory_mod, "MossClient", FakeClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
+        m._index_created = True  # process-local cache, now stale
+        m._client._add_docs_error = RuntimeError("index 'idx' not found")
+
+        memory_id = await m.insert_memory("hello world")
+
+        assert len(m._client.add_docs_calls) == 1
+        [(name, docs, _model_id)] = m._client.create_index_calls
+        assert name == "idx"
         [doc] = docs
         assert doc.id == memory_id
         assert m._index_created is True

@@ -182,6 +182,11 @@ class MossLettaMemory:
         except RuntimeError as e:
             if "not found" not in str(e).lower():
                 raise
+            # The index may have been deleted (by another process/user) since
+            # this instance last saw it exist; clear the cached "it exists"
+            # flag so insert_memory() attempts create_index() again instead of
+            # assuming a since-deleted index is still there.
+            self._index_created = False
             return
         self._index_created = True
         if generation_at_start == self._generation:
@@ -222,7 +227,22 @@ class MossLettaMemory:
                 self._index_created = True
                 # Index already exists — fall through to add_docs below.
 
-        await self._client.add_docs(self._index_name, [doc], options=MutationOptions(upsert=True))
+        try:
+            await self._client.add_docs(
+                self._index_name, [doc], options=MutationOptions(upsert=True)
+            )
+        except RuntimeError as e:
+            if "not found" not in str(e).lower():
+                raise
+            # The index existed when we last checked (self._index_created is a
+            # process-local cache) but has since been deleted by another
+            # process/user. Recreate it with this doc and retry once, rather
+            # than failing an insert_memory() call that promises to create a
+            # missing index.
+            self._index_created = False
+            await self._client.create_index(self._index_name, [doc])
+            self._index_created = True
+
         # A loaded index is a point-in-time query snapshot; invalidate it (and
         # bump the generation, so a load_index() already in flight can't mark
         # this now-stale snapshot as loaded) so the next search_memory() reloads

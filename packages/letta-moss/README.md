@@ -20,13 +20,14 @@ Registers plain async functions with `client.tools.upsert_from_function`; they r
 
 ```python
 from letta_client import Letta
-from letta_moss import moss_memory_delete, moss_memory_insert, moss_memory_search
+from letta_moss import moss_memory_insert, moss_memory_search
 
 client = Letta(token="...")
 
+# Deliberately excludes moss_memory_delete — see "Deletion is opt-in" below.
 tool_ids = [
     client.tools.upsert_from_function(func=fn, pip_requirements=["letta-moss"]).id
-    for fn in (moss_memory_insert, moss_memory_search, moss_memory_delete)
+    for fn in (moss_memory_insert, moss_memory_search)
 ]
 
 agent = client.agents.create(
@@ -43,6 +44,16 @@ agent = client.agents.create(
 ```
 
 **Why `pip_requirements`:** Letta's `upsert_from_function` uploads only the extracted source of each function, not the rest of `letta_moss/tools.py` — so `moss_memory_insert`/`_search`/`_delete` each import `_get_memory` (and, for search, `dataclasses`) *inside* their own body rather than relying on this module's top-level imports. Passing `pip_requirements=["letta-moss"]` ensures the sandbox has the package installed so those in-body imports resolve.
+
+**Deletion is opt-in:** `moss_memory_delete` is left out of the default registration above on purpose. Letta's own built-in archival memory has no delete tool either, and giving every conversational agent standing access to erase entries from a shared index is a larger blast radius than most agents need — a prompt-injected or simply mistaken agent could wipe archival memory after a search returns ids. Register it explicitly, and only for agents that are meant to curate memory (e.g. a separate admin/maintenance agent), the same way as the other tools:
+
+```python
+from letta_moss import moss_memory_delete
+
+delete_tool_id = client.tools.upsert_from_function(
+    func=moss_memory_delete, pip_requirements=["letta-moss"]
+).id
+```
 
 ## Quickstart — Option B: MCP server
 
