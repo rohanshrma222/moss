@@ -78,11 +78,13 @@ class SnowflakeConnector:
             connect_kwargs["role"] = self.role
 
         conn = snowflake.connector.connect(**connect_kwargs)
-        cursor = conn.cursor(DictCursor)
         try:
-            cursor.execute(self.query)
-            for row in cursor:
-                yield self.mapper(row)
+            cursor = conn.cursor(DictCursor)
+            try:
+                cursor.execute(self.query)
+                for row in cursor:
+                    yield self.mapper(row)
+            finally:
+                cursor.close()
         finally:
-            cursor.close()
             conn.close()
