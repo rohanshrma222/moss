@@ -16,7 +16,6 @@ up with two competing memory tool sets.
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 import os
 
 from .memory import MossLettaMemory
@@ -58,6 +57,8 @@ async def moss_memory_insert(content: str, tags: list[str] | None = None) -> str
     Returns:
         The id of the newly inserted memory.
     """
+    from letta_moss.tools import _get_memory
+
     memory = await _get_memory()
     return await memory.insert_memory(content, tags=tags)
 
@@ -77,6 +78,10 @@ async def moss_memory_search(
         A list of matching memories, each with ``id``, ``content``, ``tags``,
         ``metadata``, and ``score`` fields.
     """
+    import dataclasses
+
+    from letta_moss.tools import _get_memory
+
     memory = await _get_memory()
     items = await memory.search_memory(query, top_k=top_k, tags=tags)
     return [dataclasses.asdict(item) for item in items]
@@ -89,5 +94,7 @@ async def moss_memory_delete(memory_id: str) -> None:
         memory_id: The id of the memory to delete, as returned by
             ``moss_memory_insert`` or ``moss_memory_search``.
     """
+    from letta_moss.tools import _get_memory
+
     memory = await _get_memory()
     await memory.delete_memory(memory_id)

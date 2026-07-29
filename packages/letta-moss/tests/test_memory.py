@@ -155,6 +155,37 @@ class TestLoadIndex:
         with pytest.raises(RuntimeError, match="unauthorized"):
             await m.load_index()
 
+    async def test_mutation_during_load_prevents_stale_loaded_flag(self, monkeypatch):
+        """A load in flight during a mutation must not mark a stale snapshot loaded."""
+        import asyncio
+
+        import letta_moss.memory as memory_mod
+
+        release_load = asyncio.Event()
+
+        class SlowClient(FakeClient):
+            async def load_index(self, index_name):
+                await release_load.wait()
+                await super().load_index(index_name)
+
+        monkeypatch.setattr(memory_mod, "MossClient", SlowClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(project_id="p", project_key="k", index_name="idx")
+
+        load_task = asyncio.create_task(m.load_index())
+        await asyncio.sleep(0)  # let load_index() capture generation_at_start and block
+
+        await m.insert_memory("mutated while load was in flight")
+        assert m._index_loaded is False
+
+        release_load.set()
+        await load_task
+
+        # The load that was already in flight must not mark this stale snapshot loaded.
+        assert m._index_loaded is False
+        assert m._index_created is True
+
 
 class TestInsertMemory:
     async def test_creates_index_on_first_insert(self, monkeypatch):
@@ -174,7 +205,7 @@ class TestInsertMemory:
         assert doc.id == memory_id
         assert doc.text == "hello world"
         # Non-string metadata values are JSON-encoded with the typed prefix.
-        assert doc.metadata["n"] == '__moss_typed__:1'
+        assert doc.metadata["n"] == "__moss_typed__:1"
         assert doc.metadata["tags"] == '__moss_typed__:["a", "b"]'
         assert m._index_created is True
 
@@ -465,7 +496,7 @@ class TestMetadataRoundTrip:
     def test_escapes_plain_string_colliding_with_sentinel_prefix(self):
         from letta_moss.memory import _deserialize_metadata, _serialize_metadata
 
-        original = {"label": '__moss_typed__:42', "note": '__moss_typed__:"quoted"'}
+        original = {"label": "__moss_typed__:42", "note": '__moss_typed__:"quoted"'}
         serialized = _serialize_metadata(original)
         # The stored value must not be the bare original string, or it would
         # be mistaken for a genuinely-encoded value on read-back.

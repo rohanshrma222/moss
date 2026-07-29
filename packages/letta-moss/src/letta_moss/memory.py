@@ -141,6 +141,12 @@ class MossLettaMemory:
         self._alpha = alpha
         self._index_loaded = False
         self._index_created = False
+        # Bumped by insert_memory/delete_memory. load_index() only marks the
+        # index loaded if this hasn't changed since the load started, so a
+        # mutation that lands while a load is in flight can't be shadowed by
+        # that load completing afterward and marking a now-stale snapshot as
+        # loaded.
+        self._generation = 0
 
     async def load_index(self) -> None:
         """Preload the configured index for fast local queries. Idempotent.
@@ -152,14 +158,16 @@ class MossLettaMemory:
         """
         if self._index_loaded:
             return
+        generation_at_start = self._generation
         try:
             await self._client.load_index(self._index_name)
         except RuntimeError as e:
             if "not found" not in str(e).lower():
                 raise
             return
-        self._index_loaded = True
         self._index_created = True
+        if generation_at_start == self._generation:
+            self._index_loaded = True
 
     async def insert_memory(
         self,
@@ -176,8 +184,7 @@ class MossLettaMemory:
         """
         if metadata and "tags" in metadata:
             raise ValueError(
-                "metadata must not contain a 'tags' key; pass tags via the tags= "
-                "parameter instead."
+                "metadata must not contain a 'tags' key; pass tags via the tags= parameter instead."
             )
         memory_id = str(uuid.uuid4())
         full_meta = {**(metadata or {}), "tags": tags or []}
@@ -187,6 +194,9 @@ class MossLettaMemory:
             try:
                 await self._client.create_index(self._index_name, [doc])
                 self._index_created = True
+                # A load_index() already in flight fetched a snapshot that predates
+                # this doc; bump the generation so it can't mark itself loaded.
+                self._generation += 1
                 return memory_id
             except RuntimeError as e:
                 if "already exists" not in str(e).lower():
@@ -195,9 +205,12 @@ class MossLettaMemory:
                 # Index already exists — fall through to add_docs below.
 
         await self._client.add_docs(self._index_name, [doc], options=MutationOptions(upsert=True))
-        # A loaded index is a point-in-time query snapshot; invalidate it so the
-        # next search_memory() reloads and can see this newly added memory.
+        # A loaded index is a point-in-time query snapshot; invalidate it (and
+        # bump the generation, so a load_index() already in flight can't mark
+        # this now-stale snapshot as loaded) so the next search_memory() reloads
+        # and can see this newly added memory.
         self._index_loaded = False
+        self._generation += 1
         return memory_id
 
     async def search_memory(
@@ -241,9 +254,12 @@ class MossLettaMemory:
     async def delete_memory(self, memory_id: str) -> None:
         """Delete an archival memory by id."""
         await self._client.delete_docs(self._index_name, [memory_id])
-        # Invalidate the loaded query snapshot so the next search_memory() reloads
-        # and doesn't return an already-deleted memory.
+        # Invalidate the loaded query snapshot (and bump the generation, so a
+        # load_index() already in flight can't mark this now-stale snapshot as
+        # loaded) so the next search_memory() reloads and doesn't return an
+        # already-deleted memory.
         self._index_loaded = False
+        self._generation += 1
 
     async def get_memory(self, memory_id: str) -> ArchivalMemoryItem | None:
         """Fetch a single archival memory by id, or ``None`` if it doesn't exist."""

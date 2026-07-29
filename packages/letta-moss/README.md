@@ -25,7 +25,7 @@ from letta_moss import moss_memory_delete, moss_memory_insert, moss_memory_searc
 client = Letta(token="...")
 
 tool_ids = [
-    client.tools.upsert_from_function(func=fn).id
+    client.tools.upsert_from_function(func=fn, pip_requirements=["letta-moss"]).id
     for fn in (moss_memory_insert, moss_memory_search, moss_memory_delete)
 ]
 
@@ -41,6 +41,8 @@ agent = client.agents.create(
     },
 )
 ```
+
+**Why `pip_requirements`:** Letta's `upsert_from_function` uploads only the extracted source of each function, not the rest of `letta_moss/tools.py` — so `moss_memory_insert`/`_search`/`_delete` each import `_get_memory` (and, for search, `dataclasses`) *inside* their own body rather than relying on this module's top-level imports. Passing `pip_requirements=["letta-moss"]` ensures the sandbox has the package installed so those in-body imports resolve.
 
 ## Quickstart — Option B: MCP server
 
@@ -61,10 +63,12 @@ memory = MossLettaMemory(
 )
 
 app = create_mcp_app(memory)
-uvicorn.run(app.streamable_http_app(), host="0.0.0.0", port=8080)
+uvicorn.run(app.streamable_http_app(), host="127.0.0.1", port=8080)
 ```
 
-Then register the server as an MCP tool source on your Letta agent, pointing at `https://<public-host>/mcp`, and — as in Option A — create the agent with `include_base_tools=False`.
+**Security:** `create_mcp_app` adds no authentication of its own — the `moss_memory_insert`/`_search`/`_delete` tools are wide open to anyone who can reach the listening port. The snippet above binds to `127.0.0.1` deliberately; if Letta runs on a different host and you need to expose this beyond localhost, put it behind a reverse proxy or gateway that authenticates the caller (e.g. FastMCP's `auth`/`token_verifier` options, mTLS, or a private network) rather than binding `host="0.0.0.0"` directly to a public interface.
+
+Then register the server as an MCP tool source on your Letta agent, pointing at `https://<public-host>/mcp` (behind whatever auth layer you put in front of it), and — as in Option A — create the agent with `include_base_tools=False`.
 
 ## Public API
 
@@ -90,7 +94,7 @@ Then register the server as an MCP tool source on your Letta agent, pointing at 
 ## Dependencies
 
 - `moss>=1.1.1`
-- `mcp>=1.2` (Model Context Protocol Python SDK, FastMCP)
+- `mcp>=1.28,<2` (Model Context Protocol Python SDK, FastMCP; pinned to the v1 line — `create_mcp_app`'s `lifespan=` support and `streamable_http_app()` aren't in the v2 `MCPServer` API)
 - Python `>=3.10,<3.15`
 
 This package does not depend on `letta`/`letta-client` — it installs and runs standalone; you bring your own Letta client to register the tools.
