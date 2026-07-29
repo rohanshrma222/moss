@@ -126,8 +126,20 @@ class MossLettaMemory:
         index_name: str,
         top_k: int = 5,
         alpha: float = 0.8,
+        auto_refresh: bool = True,
+        refresh_interval_seconds: int = 60,
     ) -> None:
-        """Initialize the adapter with Moss credentials and index-query defaults."""
+        """Initialize the adapter with Moss credentials and index-query defaults.
+
+        ``auto_refresh``/``refresh_interval_seconds`` are forwarded to the
+        underlying ``MossClient.load_index()`` call: they make the SDK poll
+        for and pull in changes made by *other* processes writing to the same
+        index (e.g. another sandboxed tool worker, or a script inserting
+        memories directly). This instance's own ``insert_memory``/
+        ``delete_memory`` calls are reflected immediately regardless, via the
+        generation-counter invalidation in ``load_index`` below — auto-refresh
+        only covers the cross-process case that local invalidation can't see.
+        """
         project_id = project_id or os.getenv("MOSS_PROJECT_ID")
         project_key = project_key or os.getenv("MOSS_PROJECT_KEY")
         if not project_id or not project_key:
@@ -139,6 +151,8 @@ class MossLettaMemory:
         self._index_name = index_name
         self._top_k = top_k
         self._alpha = alpha
+        self._auto_refresh = auto_refresh
+        self._refresh_interval_seconds = refresh_interval_seconds
         self._index_loaded = False
         self._index_created = False
         # Bumped by insert_memory/delete_memory. load_index() only marks the
@@ -160,7 +174,11 @@ class MossLettaMemory:
             return
         generation_at_start = self._generation
         try:
-            await self._client.load_index(self._index_name)
+            await self._client.load_index(
+                self._index_name,
+                auto_refresh=self._auto_refresh,
+                polling_interval_in_seconds=self._refresh_interval_seconds,
+            )
         except RuntimeError as e:
             if "not found" not in str(e).lower():
                 raise

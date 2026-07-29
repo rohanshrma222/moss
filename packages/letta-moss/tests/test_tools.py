@@ -44,9 +44,11 @@ def _reset_singleton(monkeypatch):
     FakeMemory.instances = []
     monkeypatch.setattr(tools_mod, "MossLettaMemory", FakeMemory)
     monkeypatch.setattr(tools_mod, "_memory", None)
+    monkeypatch.setattr(tools_mod, "_memory_key", None)
     monkeypatch.setenv("MOSS_INDEX_NAME", "idx")
     yield
     monkeypatch.setattr(tools_mod, "_memory", None)
+    monkeypatch.setattr(tools_mod, "_memory_key", None)
 
 
 class TestLazySingleton:
@@ -66,6 +68,27 @@ class TestLazySingleton:
         results = await asyncio.gather(*(_get_memory() for _ in range(10)))
         assert len(FakeMemory.instances) == 1
         assert all(r is results[0] for r in results)
+
+    async def test_rebuilds_when_index_name_env_var_changes(self, monkeypatch):
+        from letta_moss.tools import _get_memory
+
+        first = await _get_memory()
+        monkeypatch.setenv("MOSS_INDEX_NAME", "other-idx")
+        second = await _get_memory()
+
+        assert first is not second
+        assert len(FakeMemory.instances) == 2
+        assert second.index_name == "other-idx"
+
+    async def test_rebuilds_when_project_credentials_env_vars_change(self, monkeypatch):
+        from letta_moss.tools import _get_memory
+
+        first = await _get_memory()
+        monkeypatch.setenv("MOSS_PROJECT_ID", "new-project")
+        second = await _get_memory()
+
+        assert first is not second
+        assert len(FakeMemory.instances) == 2
 
 
 class TestMossMemoryInsert:

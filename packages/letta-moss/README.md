@@ -74,7 +74,7 @@ Then register the server as an MCP tool source on your Letta agent, pointing at 
 
 | Symbol | Kind | Purpose |
 |---|---|---|
-| `MossLettaMemory(*, project_id=None, project_key=None, index_name, top_k=5, alpha=0.8)` | class | Core adapter; `async load_index()`, `async insert_memory(content, tags=, metadata=) -> str`, `async search_memory(query, top_k=, tags=) -> list[ArchivalMemoryItem]`, `async delete_memory(memory_id)`, `async get_memory(memory_id) -> ArchivalMemoryItem \| None`, `async list_memories(limit=) -> list[ArchivalMemoryItem]`. Falls back to `MOSS_PROJECT_ID`/`MOSS_PROJECT_KEY` env vars when credentials are omitted. |
+| `MossLettaMemory(*, project_id=None, project_key=None, index_name, top_k=5, alpha=0.8, auto_refresh=True, refresh_interval_seconds=60)` | class | Core adapter; `async load_index()`, `async insert_memory(content, tags=, metadata=) -> str`, `async search_memory(query, top_k=, tags=) -> list[ArchivalMemoryItem]`, `async delete_memory(memory_id)`, `async get_memory(memory_id) -> ArchivalMemoryItem \| None`, `async list_memories(limit=) -> list[ArchivalMemoryItem]`. Falls back to `MOSS_PROJECT_ID`/`MOSS_PROJECT_KEY` env vars when credentials are omitted. `auto_refresh`/`refresh_interval_seconds` are forwarded to Moss's `load_index()` so this process's in-memory snapshot picks up writes made by *other* processes against the same index, not just its own. |
 | `moss_memory_insert(content, tags=None) -> str` | async function | Custom-tool wrapper; insert a memory, return its id. |
 | `moss_memory_search(query, top_k=5, tags=None) -> list[dict]` | async function | Custom-tool wrapper; search memories, return dicts. |
 | `moss_memory_delete(memory_id) -> None` | async function | Custom-tool wrapper; delete a memory by id. |
@@ -90,6 +90,8 @@ Then register the server as an MCP tool source on your Letta agent, pointing at 
 **Reserved metadata key:** `insert_memory`'s `metadata` argument must not contain a `"tags"` key — `tags` is a first-class parameter, and passing it inside `metadata` too raises `ValueError` rather than silently overwriting one or the other.
 
 **Env var fallback:** `MossLettaMemory` falls back to `MOSS_PROJECT_ID`/`MOSS_PROJECT_KEY` when constructor args are omitted, unlike some other Moss integrations in this repo (e.g. `agora-moss`) that require explicit args. This is deliberate: these tools typically run inside Letta's sandboxed tool-execution environment, where env vars passed via `tool_exec_environment_variables` are the natural way to configure credentials without hardcoding them in tool source.
+
+**Sandbox process reuse:** the Option A custom tools cache a single `MossLettaMemory` instance at module scope per worker process (so `load_index()` only runs once). That cache is keyed on `MOSS_PROJECT_ID`/`MOSS_PROJECT_KEY`/`MOSS_INDEX_NAME` — if Letta reuses the same worker process for a different agent whose `tool_exec_environment_variables` set different values, the cached instance is discarded and rebuilt against the new values rather than leaking reads/writes across agents.
 
 ## Dependencies
 

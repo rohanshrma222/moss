@@ -29,8 +29,10 @@ class FakeClient:
         self._query_return = FakeQueryResult(docs=[])
         self._create_index_error = None
         self._load_index_error = None
+        self.load_index_calls = []
 
-    async def load_index(self, index_name):
+    async def load_index(self, index_name, auto_refresh=False, polling_interval_in_seconds=600):
+        self.load_index_calls.append((index_name, auto_refresh, polling_interval_in_seconds))
         if self._load_index_error is not None:
             raise self._load_index_error
 
@@ -103,6 +105,22 @@ class TestLoadIndex:
         await m.load_index()
         assert m._index_loaded is True
 
+    async def test_forwards_auto_refresh_settings_to_client(self, monkeypatch):
+        import letta_moss.memory as memory_mod
+
+        monkeypatch.setattr(memory_mod, "MossClient", FakeClient)
+        from letta_moss.memory import MossLettaMemory
+
+        m = MossLettaMemory(
+            project_id="p",
+            project_key="k",
+            index_name="idx",
+            auto_refresh=True,
+            refresh_interval_seconds=45,
+        )
+        await m.load_index()
+        assert m._client.load_index_calls == [("idx", True, 45)]
+
     async def test_marks_index_created_on_successful_load(self, monkeypatch):
         import letta_moss.memory as memory_mod
 
@@ -120,7 +138,9 @@ class TestLoadIndex:
         load_calls = []
 
         class TrackingClient(FakeClient):
-            async def load_index(self, index_name):
+            async def load_index(
+                self, index_name, auto_refresh=False, polling_interval_in_seconds=600
+            ):
                 load_calls.append(index_name)
 
         monkeypatch.setattr(memory_mod, "MossClient", TrackingClient)
@@ -164,9 +184,11 @@ class TestLoadIndex:
         release_load = asyncio.Event()
 
         class SlowClient(FakeClient):
-            async def load_index(self, index_name):
+            async def load_index(
+                self, index_name, auto_refresh=False, polling_interval_in_seconds=600
+            ):
                 await release_load.wait()
-                await super().load_index(index_name)
+                await super().load_index(index_name, auto_refresh, polling_interval_in_seconds)
 
         monkeypatch.setattr(memory_mod, "MossClient", SlowClient)
         from letta_moss.memory import MossLettaMemory

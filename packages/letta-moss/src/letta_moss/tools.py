@@ -21,28 +21,42 @@ import os
 from .memory import MossLettaMemory
 
 _memory: MossLettaMemory | None = None
+_memory_key: tuple[str | None, str | None, str] | None = None
 _memory_lock = asyncio.Lock()
+
+
+def _current_memory_key() -> tuple[str | None, str | None, str]:
+    """Read the env vars that identify which Moss index/credentials to use."""
+    index_name = os.getenv("MOSS_INDEX_NAME")
+    if not index_name:
+        raise ValueError("MOSS_INDEX_NAME env var is required.")
+    return (os.getenv("MOSS_PROJECT_ID"), os.getenv("MOSS_PROJECT_KEY"), index_name)
 
 
 async def _get_memory() -> MossLettaMemory:
     """Lazily build and load the module-level ``MossLettaMemory`` singleton.
 
     A single instance is reused across tool calls within a sandbox process so
-    ``load_index()`` (and the underlying index download) only happens once.
-    Guarded by a lock so concurrent tool calls can't each construct and load
-    their own instance before the first one is stored.
+    ``load_index()`` (and the underlying index download) only happens once —
+    but only for as long as ``MOSS_PROJECT_ID``/``MOSS_PROJECT_KEY``/
+    ``MOSS_INDEX_NAME`` keep resolving to the same values. If a worker process
+    gets reused for a different agent/config (a different set of
+    ``tool_exec_environment_variables``), the cached instance is discarded and
+    rebuilt against the new env vars instead of silently leaking reads/writes
+    to the previous agent's index. Guarded by a lock so concurrent tool calls
+    can't each construct and load their own instance before the first one is
+    stored.
     """
-    global _memory
-    if _memory is not None:
+    global _memory, _memory_key
+    key = _current_memory_key()
+    if _memory is not None and _memory_key == key:
         return _memory
     async with _memory_lock:
-        if _memory is None:
-            index_name = os.getenv("MOSS_INDEX_NAME")
-            if not index_name:
-                raise ValueError("MOSS_INDEX_NAME env var is required.")
-            memory = MossLettaMemory(index_name=index_name)
+        if _memory is None or _memory_key != key:
+            memory = MossLettaMemory(index_name=key[2])
             await memory.load_index()
             _memory = memory
+            _memory_key = key
     return _memory
 
 
